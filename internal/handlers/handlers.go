@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 
 	"github.com/CloudyKit/jet/v6"
 	"github.com/gorilla/websocket"
@@ -37,16 +38,17 @@ type WebSocketConnection struct {
 
 // WsJsonResponse defines the response sent back from websocket
 type WsJsonResponse struct {
-	Action      string `json:"action"`
-	Message     string `json:"message"`
-	MessageType string `json:"message_type"`
+	Action         string   `json:"action"`
+	Message        string   `json:"message"`
+	MessageType    string   `json:"message_type"`
+	ConnectedUsers []string `json:"connected_users"`
 }
 
 type WsPayload struct {
 	Action   string              `json:"action"`
 	Username string              `json:"username"`
 	Message  string              `json:"message"`
-	Con      WebSocketConnection `json:"-"`
+	Conn     WebSocketConnection `json:"-"`
 }
 
 // WsEndpoint upgrades coonnection to websocket
@@ -76,10 +78,38 @@ func ListenToWsChannel() {
 	var response WsJsonResponse
 	for {
 		e := <-wsChan
-		response.Action = "Got here"
-		response.Message = fmt.Sprintf("Some message, and acrion was %s", e.Action)
-		broadcastToAll(response)
+
+		switch e.Action {
+		case "username":
+			// get the list of all uusers and send it back via broadcast
+			clients[e.Conn] = e.Username
+			users := getUserList()
+			response.Action = "list_users"
+			response.ConnectedUsers = users
+			broadcastToAll(response)
+		case "left":
+			response.Action = "list_users"
+			delete(clients, e.Conn)
+			users := getUserList()
+			response.ConnectedUsers = users
+			broadcastToAll(response)
+		}
+
+		// response.Action = "Got here"
+		// response.Message = fmt.Sprintf("Some message, and acrion was %s", e.Action)
+		// broadcastToAll(response)
 	}
+}
+
+func getUserList() []string {
+	var userList []string
+	for _, x := range clients {
+		if x != "" {
+			userList = append(userList, x)
+		}
+	}
+	sort.Strings(userList)
+	return userList
 }
 
 func broadcastToAll(response WsJsonResponse) {
@@ -87,6 +117,7 @@ func broadcastToAll(response WsJsonResponse) {
 		err := client.WriteJSON(response)
 		if err != nil {
 			log.Println("Websocket error")
+			log.Println(err)
 			_ = client.Close()
 			delete(clients, client)
 		}
@@ -107,7 +138,7 @@ func ListenForWs(conn *WebSocketConnection) {
 		if err != nil {
 			//do nofing
 		} else {
-			payload.Con = *conn
+			payload.Conn = *conn
 			wsChan <- payload
 		}
 	}
